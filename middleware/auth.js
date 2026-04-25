@@ -1,5 +1,4 @@
-// middleware/auth.js
-import { createClient } from '@supabase/supabase-js';
+import { createClient } from "@supabase/supabase-js";
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -9,7 +8,9 @@ const supabase = createClient(
 export async function verifyUser(req, res, next) {
   const token = req.headers.authorization?.replace("Bearer ", "");
 
-  if (!token) return res.status(401).json({ error: "No token" });
+  if (!token) {
+    return res.status(401).json({ error: "No token" });
+  }
 
   const { data, error } = await supabase.auth.getUser(token);
 
