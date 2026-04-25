@@ -2,6 +2,7 @@ import fetch from "node-fetch";
 
 const BASE = process.env.EMQX_BASE_URL;
 
+// 🔐 Auth header
 function getAuthHeader() {
   const token = Buffer.from(
     process.env.EMQX_API_KEY + ":" + process.env.EMQX_API_SECRET
@@ -27,39 +28,62 @@ export async function createUser(username, password) {
     }
   );
 
+  const text = await res.text();
+  console.log("CREATE USER:", text);
+
   if (!res.ok) {
-    const err = await res.text();
-    throw new Error("EMQX createUser failed: " + err);
+    throw new Error("EMQX createUser failed: " + text);
   }
 }
 
-// 🔹 Create ACL (STRICT)
+// 🔹 Create ACL (FIXED)
 export async function createACL(username, namespace, role) {
   let rules = [];
 
   if (role === "viewer") {
     rules = [
-      { action: "subscribe", topic: `nexus/${namespace}/status` }
+      {
+        permission: "allow",
+        action: "subscribe",
+        topic: `nexus/${namespace}/status`
+      }
     ];
   } else {
     rules = [
-      { action: "publish", topic: `nexus/${namespace}/command` },
-      { action: "subscribe", topic: `nexus/${namespace}/status` }
+      {
+        permission: "allow",
+        action: "publish",
+        topic: `nexus/${namespace}/command`
+      },
+      {
+        permission: "allow",
+        action: "subscribe",
+        topic: `nexus/${namespace}/status`
+      }
     ];
   }
 
   const res = await fetch(
-    `${BASE}/authorization/sources/built_in_database/rules/users/${username}`,
+    `${BASE}/authorization/sources/built_in_database/rules`,
     {
       method: "POST",
       headers: getAuthHeader(),
-      body: JSON.stringify({ rules })
+      body: JSON.stringify({
+        rules: [
+          {
+            username: username,
+            rules: rules
+          }
+        ]
+      })
     }
   );
 
+  const text = await res.text();
+  console.log("ACL RESPONSE:", text);
+
   if (!res.ok) {
-    const err = await res.text();
-    throw new Error("EMQX ACL failed: " + err);
+    throw new Error("EMQX ACL failed: " + text);
   }
 }
 
@@ -73,8 +97,10 @@ export async function deleteUser(username) {
     }
   );
 
+  const text = await res.text();
+  console.log("DELETE USER:", text);
+
   if (!res.ok) {
-    const err = await res.text();
-    throw new Error("EMQX deleteUser failed: " + err);
+    throw new Error("EMQX deleteUser failed: " + text);
   }
 }
