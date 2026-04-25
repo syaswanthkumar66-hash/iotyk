@@ -1,6 +1,7 @@
 import express from "express";
 import dotenv from "dotenv";
 import mqttRoutes from "./routes/mqtt.js";
+import factoryRoutes from "./routes/factory.js";
 
 dotenv.config();
 
@@ -8,6 +9,7 @@ const app = express();
 app.use(express.json());
 
 app.use("/api/v1/mqtt", mqttRoutes);
+app.use("/api/v1/factory", factoryRoutes);
 
 app.get("/api/v1/health", (req, res) => {
   res.json({ ok: true });
