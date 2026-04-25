@@ -1,4 +1,3 @@
-// routes/mqtt.js
 import express from "express";
 import { verifyUser } from "../middleware/auth.js";
 import { createMQTTSession } from "../services/mqttSession.js";
@@ -23,6 +22,8 @@ router.post("/session", verifyUser, async (req, res) => {
     });
 
   } catch (err) {
+    console.error("SESSION ERROR:", err.message);
+
     res.status(400).json({
       success: false,
       error: err.message
