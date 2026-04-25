@@ -1,13 +1,20 @@
-// services/mqttSession.js
+import crypto from "crypto";
 import { supabase } from "./supabase.js";
 import { createUser, createACL } from "./emqxCloud.js";
-import crypto from "crypto";
-import { buildNamespace } from "../utils/crypto.js";
+
+// 🔐 namespace generator
+function buildNamespace(device_id) {
+  return crypto
+    .createHmac("sha256", process.env.TOPIC_SECRET)
+    .update(device_id)
+    .digest("hex")
+    .substring(0, 32);
+}
 
 export async function createMQTTSession(user_id, device_id) {
 
-  // 🔐 Check access (STRICT)
-  const { data: access, error } = await supabase
+  // 🔍 Check access
+  const { data: access } = await supabase
     .from("device_access")
     .select("role")
     .eq("user_id", user_id)
@@ -24,7 +31,7 @@ export async function createMQTTSession(user_id, device_id) {
 
   const namespace = buildNamespace(device_id);
 
-  // 📡 EMQX Cloud
+  // 📡 EMQX calls
   await createUser(username, password);
   await createACL(username, namespace, role);
 
@@ -33,11 +40,8 @@ export async function createMQTTSession(user_id, device_id) {
     user_id,
     device_id,
     username,
-    password_hash: crypto
-      .createHash("sha256")
-      .update(password)
-      .digest("hex"),
-    expires_at: new Date(Date.now() + 60 * 60 * 1000)
+    password_hash: crypto.createHash("sha256").update(password).digest("hex"),
+    expires_at: new Date(Date.now() + 3600 * 1000)
   });
 
   return {
