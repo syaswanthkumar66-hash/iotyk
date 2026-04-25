@@ -1,8 +1,7 @@
 import crypto from "crypto";
 import { supabase } from "./supabase.js";
-import { createUser, createACL } from "./emqxCloud.js";
+import fetch from "node-fetch";
 
-// 🔐 namespace generator
 function buildNamespace(device_id) {
   return crypto
     .createHmac("sha256", process.env.TOPIC_SECRET)
@@ -11,9 +10,32 @@ function buildNamespace(device_id) {
     .substring(0, 32);
 }
 
-export async function createMQTTSession(user_id, device_id) {
+// 🔴 Disconnect existing client (IMPORTANT)
+async function disconnectClient(clientId) {
+  try {
+    await fetch(
+      `${process.env.EMQX_BASE_URL}/clients/${clientId}`,
+      {
+        method: "DELETE",
+        headers: {
+          Authorization:
+            "Basic " +
+            Buffer.from(
+              process.env.EMQX_API_KEY +
+                ":" +
+                process.env.EMQX_API_SECRET
+            ).toString("base64"),
+        },
+      }
+    );
+  } catch (err) {
+    console.log("Disconnect failed (ignore if none):", err.message);
+  }
+}
 
-  // 🔍 Check access
+export async function createMQTTSession(user_id, device_id, ip) {
+
+  // 🔐 Check access
   const { data: access } = await supabase
     .from("device_access")
     .select("role")
@@ -23,31 +45,49 @@ export async function createMQTTSession(user_id, device_id) {
 
   if (!access) throw new Error("Access denied");
 
-  const role = access.role;
-
-  // 🔑 Generate credentials
-  const username = "u_" + crypto.randomUUID();
-  const password = crypto.randomBytes(32).toString("hex");
-
   const namespace = buildNamespace(device_id);
 
-  // 📡 EMQX calls
-  await createUser(username, password);
-  await createACL(username, namespace, role);
+  const clientId = namespace;
+  const username = namespace;
+  const password = crypto.randomBytes(32).toString("hex");
 
-  // 💾 Store session
+  // 🔴 Kill previous sessions
+  const { data: oldSessions } = await supabase
+    .from("mqtt_sessions")
+    .select("*")
+    .eq("device_id", device_id);
+
+  if (oldSessions) {
+    for (const s of oldSessions) {
+      await disconnectClient(s.client_id);
+    }
+  }
+
+  // 🧹 Delete old sessions
+  await supabase
+    .from("mqtt_sessions")
+    .delete()
+    .eq("device_id", device_id);
+
+  // 💾 Save new session
   await supabase.from("mqtt_sessions").insert({
     user_id,
     device_id,
+    client_id: clientId,
     username,
-    password_hash: crypto.createHash("sha256").update(password).digest("hex"),
-    expires_at: new Date(Date.now() + 3600 * 1000)
+    password_hash: crypto
+      .createHash("sha256")
+      .update(password)
+      .digest("hex"),
+    ip,
+    expires_at: new Date(Date.now() + 60 * 60 * 1000),
   });
 
   return {
+    clientId,
     username,
     password,
     namespace,
-    broker: process.env.MQTT_HOST
+    broker: process.env.MQTT_HOST,
   };
 }
