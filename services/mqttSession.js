@@ -1,7 +1,8 @@
 import crypto from "crypto";
-import { supabase } from "./supabase.js";
 import fetch from "node-fetch";
+import { supabase } from "./supabase.js";
 
+// 🔐 Namespace generator
 function buildNamespace(device_id) {
   return crypto
     .createHmac("sha256", process.env.TOPIC_SECRET)
@@ -10,7 +11,7 @@ function buildNamespace(device_id) {
     .substring(0, 32);
 }
 
-// 🔴 Disconnect existing client (IMPORTANT)
+// 🔴 Disconnect existing MQTT client
 async function disconnectClient(clientId) {
   try {
     await fetch(
@@ -29,13 +30,14 @@ async function disconnectClient(clientId) {
       }
     );
   } catch (err) {
-    console.log("Disconnect failed (ignore if none):", err.message);
+    console.log("Disconnect failed:", err.message);
   }
 }
 
+// 🚀 MAIN FUNCTION
 export async function createMQTTSession(user_id, device_id, ip) {
 
-  // 🔐 Check access
+  // 🔐 Check user access
   const { data: access } = await supabase
     .from("device_access")
     .select("role")
@@ -45,18 +47,20 @@ export async function createMQTTSession(user_id, device_id, ip) {
 
   if (!access) throw new Error("Access denied");
 
+  // 🔑 Generate namespace
   const namespace = buildNamespace(device_id);
 
   const clientId = namespace;
   const username = namespace;
   const password = crypto.randomBytes(32).toString("hex");
 
-  // 🔴 Kill previous sessions
+  // 🔴 Fetch old sessions
   const { data: oldSessions } = await supabase
     .from("mqtt_sessions")
     .select("*")
     .eq("device_id", device_id);
 
+  // 🔴 Disconnect old sessions
   if (oldSessions) {
     for (const s of oldSessions) {
       await disconnectClient(s.client_id);
@@ -69,7 +73,10 @@ export async function createMQTTSession(user_id, device_id, ip) {
     .delete()
     .eq("device_id", device_id);
 
-  // 💾 Save new session
+  // ⏱️ 15 min expiry
+  const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
+
+  // 💾 Store new session
   await supabase.from("mqtt_sessions").insert({
     user_id,
     device_id,
@@ -80,7 +87,7 @@ export async function createMQTTSession(user_id, device_id, ip) {
       .update(password)
       .digest("hex"),
     ip,
-    expires_at: new Date(Date.now() + 60 * 60 * 1000),
+    expires_at: expiresAt,
   });
 
   return {
@@ -89,5 +96,6 @@ export async function createMQTTSession(user_id, device_id, ip) {
     password,
     namespace,
     broker: process.env.MQTT_HOST,
+    expires_in: 900
   };
 }
