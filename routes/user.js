@@ -33,7 +33,7 @@ router.get("/devices", verifyUser, async (req, res) => {
 });
 
 
-// 🔗 ADD DEVICE (UPDATED FLOW)
+// 🔗 ADD DEVICE (FINAL FIXED)
 router.post("/add-device", verifyUser, async (req, res) => {
   try {
     const userId = req.user.id;
@@ -45,7 +45,7 @@ router.post("/add-device", verifyUser, async (req, res) => {
       return res.status(400).json({ error: "Missing fields" });
     }
 
-    // 🔎 1. Check in factory_devices (NOT devices)
+    // 🔎 1. Check factory_devices
     const { data: factoryDevice, error: findError } = await supabase
       .from("factory_devices")
       .select("*")
@@ -66,7 +66,10 @@ router.post("/add-device", verifyUser, async (req, res) => {
       return res.status(400).json({ error: "Device already paired" });
     }
 
-    // 🔗 4. Insert into devices table
+    // ✅ 4. Generate MQTT credential hash (FIXED)
+    const hash = hashCredential(factoryDevice.device_salt);
+
+    // 🔗 5. Insert into devices table
     const { error: insertError } = await supabase
       .from("devices")
       .insert({
@@ -74,6 +77,7 @@ router.post("/add-device", verifyUser, async (req, res) => {
         device_salt: factoryDevice.device_salt,
         topic_namespace: factoryDevice.namespace,
         user_id: userId,
+        mqtt_credential_hash: hash,   // ✅ REQUIRED FIELD
         current_state: {},
         status: "offline"
       });
@@ -82,7 +86,7 @@ router.post("/add-device", verifyUser, async (req, res) => {
       return res.status(500).json({ error: insertError.message });
     }
 
-    // 🔄 5. Update factory status
+    // 🔄 6. Update factory status
     await supabase
       .from("factory_devices")
       .update({
@@ -104,16 +108,3 @@ router.post("/add-device", verifyUser, async (req, res) => {
 });
 
 export default router;
-
-
-const hash = hashCredential(factoryDevice.device_salt);
-
-await supabase.from("devices").insert({
-  device_id: factoryDevice.device_id,
-  device_salt: factoryDevice.device_salt,
-  topic_namespace: factoryDevice.namespace,
-  user_id: userId,
-  mqtt_credential_hash: hash,  // ✅ fixed
-  current_state: {},
-  status: "offline"
-});
