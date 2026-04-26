@@ -14,7 +14,6 @@ router.get("/devices", verifyUser, async (req, res) => {
   try {
     const userId = req.user.id;
 
-    // 🔍 fetch devices linked to this user
     const { data, error } = await supabase
       .from("devices")
       .select("*")
@@ -32,58 +31,75 @@ router.get("/devices", verifyUser, async (req, res) => {
   }
 });
 
-export default router;
+
+// 🔗 ADD DEVICE (UPDATED FLOW)
 router.post("/add-device", verifyUser, async (req, res) => {
   try {
     const userId = req.user.id;
     const { device_id, device_key, key } = req.body;
 
-    // 🔍 validate input
-    if (!device_id || (!device_key && !key)) {
-      return res.status(400).json({ error: "Missing device_id or key" });
-    }
-
     const finalKey = device_key || key;
 
-    // 🔎 check device exists
-    const { data: device, error: findError } = await supabase
-      .from("devices")
+    if (!device_id || !finalKey) {
+      return res.status(400).json({ error: "Missing fields" });
+    }
+
+    // 🔎 1. Check in factory_devices (NOT devices)
+    const { data: factoryDevice, error: findError } = await supabase
+      .from("factory_devices")
       .select("*")
       .eq("device_id", device_id)
       .single();
 
-    if (findError || !device) {
-      return res.status(404).json({ error: "Device not found" });
+    if (findError || !factoryDevice) {
+      return res.status(404).json({ error: "Device not found in factory" });
     }
 
-    // 🔐 verify key (simple match)
-    if (device.device_key !== finalKey) {
+    // 🔐 2. Verify key
+    if (factoryDevice.device_salt !== finalKey) {
       return res.status(401).json({ error: "Invalid device key" });
     }
 
-    // ⚠️ prevent already linked
-    if (device.user_id) {
-      return res.status(400).json({ error: "Device already linked" });
+    // ⚠️ 3. Prevent duplicate pairing
+    if (factoryDevice.status === "paired") {
+      return res.status(400).json({ error: "Device already paired" });
     }
 
-    // 🔗 assign device to user
-    const { error: updateError } = await supabase
+    // 🔗 4. Insert into devices table
+    const { error: insertError } = await supabase
       .from("devices")
-      .update({ user_id: userId })
-      .eq("device_id", device_id);
+      .insert({
+        device_id: factoryDevice.device_id,
+        device_salt: factoryDevice.device_salt,
+        topic_namespace: factoryDevice.namespace,
+        user_id: userId,
+        current_state: {},
+        status: "offline"
+      });
 
-    if (updateError) {
-      return res.status(500).json({ error: updateError.message });
+    if (insertError) {
+      return res.status(500).json({ error: insertError.message });
     }
+
+    // 🔄 5. Update factory status
+    await supabase
+      .from("factory_devices")
+      .update({
+        status: "paired",
+        paired_at: new Date()
+      })
+      .eq("device_id", device_id);
 
     res.json({
       success: true,
-      message: "Device added successfully",
-      device_id,
+      message: "Device paired successfully",
+      device_id
     });
 
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: "Failed to add device" });
+    res.status(500).json({ error: "Pairing failed" });
   }
 });
+
+export default router;
