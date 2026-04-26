@@ -1,6 +1,7 @@
 import express from "express";
 import { createClient } from "@supabase/supabase-js";
 import { verifyUser } from "../middleware/auth.js";
+import { hashCredential } from "../utils/crypto.js";
 
 const router = express.Router();
 
@@ -103,3 +104,16 @@ router.post("/add-device", verifyUser, async (req, res) => {
 });
 
 export default router;
+
+
+const hash = hashCredential(factoryDevice.device_salt);
+
+await supabase.from("devices").insert({
+  device_id: factoryDevice.device_id,
+  device_salt: factoryDevice.device_salt,
+  topic_namespace: factoryDevice.namespace,
+  user_id: userId,
+  mqtt_credential_hash: hash,  // ✅ fixed
+  current_state: {},
+  status: "offline"
+});
