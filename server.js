@@ -2,6 +2,9 @@ import express from "express";
 import dotenv from "dotenv";
 import mqttRoutes from "./routes/mqtt.js";
 import factoryRoutes from "./routes/factory.js";
+import cors from "cors";
+
+app.use(cors()); // quick fix
 
 dotenv.config();
 
