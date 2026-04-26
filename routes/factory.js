@@ -1,60 +1,57 @@
 import express from "express";
 import crypto from "crypto";
-import { supabase } from "../services/supabase.js";
+import { createClient } from "@supabase/supabase-js";
 
 const router = express.Router();
 
-// 🔒 simple factory auth (Supabase JWT must exist)
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_KEY
+);
+
+// ⚙️ GENERATE DEVICE
 router.post("/device", async (req, res) => {
   try {
-    const token = req.headers.authorization?.replace("Bearer ", "");
-    if (!token) return res.status(401).json({ error: "No token" });
+    // 🔐 Generate values
+    const DEVICE_ID = "esp32-" + crypto.randomBytes(4).toString("hex");
+    const DEVICE_SALT = crypto.randomBytes(16).toString("hex");
+    const NAMESPACE = crypto.randomBytes(16).toString("hex");
 
-    // verify user
-    const { data, error } = await supabase.auth.getUser(token);
-    if (error || !data.user) {
-      return res.status(401).json({ error: "Unauthorized" });
-    }
-
-    // OPTIONAL: restrict factory users
-    if (!data.user.email.endsWith("@yourfactory.com")) {
-      return res.status(403).json({ error: "Factory only" });
-    }
-
-    // 🔧 generate device
-    const device_id = "esp32-" + crypto.randomBytes(4).toString("hex");
-    const device_salt = crypto.randomBytes(16).toString("hex");
-
-    const namespace = crypto
-      .createHmac("sha256", process.env.TOPIC_SECRET)
-      .update(device_id)
-      .digest("hex")
-      .substring(0, 32);
-
-    // store in DB
-    const { data: inserted } = await supabase
-      .from("devices")
+    // ✅ INSERT INTO factory_devices
+    const { error } = await supabase
+      .from("factory_devices")
       .insert({
-        device_id,
-        device_salt,
-        topic_namespace: namespace
-      })
-      .select()
-      .single();
+        device_id: DEVICE_ID,
+        device_salt: DEVICE_SALT,
+        namespace: NAMESPACE,
+        status: "created"
+      });
 
+    if (error) {
+      console.error("DB ERROR:", error);
+      return res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
+
+    // ✅ RESPONSE
     res.json({
       success: true,
-      device: inserted,
       config: {
-        DEVICE_ID: device_id,
-        DEVICE_SALT: device_salt,
-        NAMESPACE: namespace,
+        DEVICE_ID,
+        DEVICE_SALT,
+        NAMESPACE,
         MQTT_HOST: process.env.MQTT_HOST
       }
     });
 
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error("FACTORY ERROR:", err);
+    res.status(500).json({
+      success: false,
+      error: "Factory generation failed"
+    });
   }
 });
 
