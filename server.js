@@ -4,12 +4,12 @@ import dotenv from "dotenv";
 import mqttRoutes from "./routes/mqtt.js";
 import factoryRoutes from "./routes/factory.js";
 
-app.use(cors()); // quick fix
 
 dotenv.config();
 
 const app = express();
 app.use(express.json());
+app.use(cors()); // quick fix
 
 app.use("/api/v1/mqtt", mqttRoutes);
 app.use("/api/v1/factory", factoryRoutes);
