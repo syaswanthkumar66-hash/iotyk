@@ -33,7 +33,7 @@ router.get("/devices", verifyUser, async (req, res) => {
 });
 
 
-// 🔗 ADD DEVICE (FINAL FIXED)
+// 🔗 ADD DEVICE (FINAL FULL FIX)
 router.post("/add-device", verifyUser, async (req, res) => {
   try {
     const userId = req.user.id;
@@ -66,8 +66,11 @@ router.post("/add-device", verifyUser, async (req, res) => {
       return res.status(400).json({ error: "Device already paired" });
     }
 
-    // ✅ 4. Generate MQTT credential hash (FIXED)
-    const hash = hashCredential(factoryDevice.device_salt);
+    // ✅ 4. Generate BOTH hashes (IMPORTANT FIX)
+    const mqttHash = hashCredential(factoryDevice.device_salt);
+    const wssHash  = hashCredential(
+      factoryDevice.device_id + factoryDevice.device_salt
+    );
 
     // 🔗 5. Insert into devices table
     const { error: insertError } = await supabase
@@ -77,7 +80,10 @@ router.post("/add-device", verifyUser, async (req, res) => {
         device_salt: factoryDevice.device_salt,
         topic_namespace: factoryDevice.namespace,
         user_id: userId,
-        mqtt_credential_hash: hash,   // ✅ REQUIRED FIELD
+
+        mqtt_credential_hash: mqttHash,   // ✅ required
+        wss_key_hash: wssHash,            // ✅ required (FIX)
+
         current_state: {},
         status: "offline"
       });
