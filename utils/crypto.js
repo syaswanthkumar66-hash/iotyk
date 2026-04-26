@@ -1,10 +1,17 @@
-// utils/crypto.js
 import crypto from "crypto";
 
-export function buildNamespace(device_id) {
-  return crypto
-    .createHmac("sha256", process.env.TOPIC_SECRET)
-    .update(device_id)
-    .digest("hex")
-    .substring(0, 32);
-}
+// create hash from device_salt (or device_id + salt)
+const hash = crypto
+  .createHash("sha256")
+  .update(factoryDevice.device_salt)
+  .digest("hex");
+
+await supabase.from("devices").insert({
+  device_id: factoryDevice.device_id,
+  device_salt: factoryDevice.device_salt,
+  topic_namespace: factoryDevice.namespace,
+  user_id: userId,
+  mqtt_credential_hash: hash,   // ✅ FIX
+  current_state: {},
+  status: "offline"
+});
