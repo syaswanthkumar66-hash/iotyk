@@ -1,7 +1,6 @@
 import express from "express";
 import { createClient } from "@supabase/supabase-js";
 import { verifyUser } from "../middleware/auth.js";
-import { hashCredential } from "../utils/crypto.js";
 
 const router = express.Router();
 
@@ -20,95 +19,69 @@ router.get("/devices", verifyUser, async (req, res) => {
       .select("*")
       .eq("user_id", userId);
 
-    if (error) {
-      return res.status(500).json({ error: error.message });
-    }
+    if (error) return res.status(500).json({ error: error.message });
 
     res.json(data);
 
-  } catch (err) {
-    console.error(err);
+  } catch {
     res.status(500).json({ error: "Failed to fetch devices" });
   }
 });
 
 
-// 🔗 ADD DEVICE (FINAL FULL FIX)
+// 🔗 FINAL LINK DEVICE (NO KEY CHECK HERE)
 router.post("/add-device", verifyUser, async (req, res) => {
   try {
     const userId = req.user.id;
-    const { device_id, device_key, key } = req.body;
+    const { device_id, owner_token } = req.body;
 
-    const finalKey = device_key || key;
-
-    if (!device_id || !finalKey) {
+    if (!device_id || !owner_token) {
       return res.status(400).json({ error: "Missing fields" });
     }
 
-    // 🔎 1. Check factory_devices
-    const { data: factoryDevice, error: findError } = await supabase
+    const { data: factoryDevice } = await supabase
       .from("factory_devices")
       .select("*")
       .eq("device_id", device_id)
       .single();
 
-    if (findError || !factoryDevice) {
-      return res.status(404).json({ error: "Device not found in factory" });
+    if (!factoryDevice) {
+      return res.status(404).json({ error: "Device not found" });
     }
 
-    // 🔐 2. Verify key
-    if (factoryDevice.device_salt !== finalKey) {
-      return res.status(401).json({ error: "Invalid device key" });
+    if (factoryDevice.paired) {
+      return res.status(400).json({ error: "Already paired" });
     }
 
-    // ⚠️ 3. Prevent duplicate pairing
-    if (factoryDevice.status === "paired") {
-      return res.status(400).json({ error: "Device already paired" });
-    }
-
-    // ✅ 4. Generate BOTH hashes (IMPORTANT FIX)
-    const mqttHash = hashCredential(factoryDevice.device_salt);
-    const wssHash  = hashCredential(
-      factoryDevice.device_id + factoryDevice.device_salt
-    );
-
-    // 🔗 5. Insert into devices table
+    // insert into devices
     const { error: insertError } = await supabase
       .from("devices")
       .insert({
-        device_id: factoryDevice.device_id,
-        device_salt: factoryDevice.device_salt,
-        topic_namespace: factoryDevice.namespace,
+        device_id,
         user_id: userId,
-
-        mqtt_credential_hash: mqttHash,   // ✅ required
-        wss_key_hash: wssHash,            // ✅ required (FIX)
-
-        current_state: {},
-        status: "offline"
+        owner_token,
+        topic_namespace: factoryDevice.namespace,
+        status: "offline",
+        current_state: {}
       });
 
     if (insertError) {
       return res.status(500).json({ error: insertError.message });
     }
 
-    // 🔄 6. Update factory status
+    // mark paired
     await supabase
       .from("factory_devices")
       .update({
+        paired: true,
         status: "paired",
         paired_at: new Date()
       })
       .eq("device_id", device_id);
 
-    res.json({
-      success: true,
-      message: "Device paired successfully",
-      device_id
-    });
+    res.json({ success: true });
 
-  } catch (err) {
-    console.error(err);
+  } catch {
     res.status(500).json({ error: "Pairing failed" });
   }
 });
