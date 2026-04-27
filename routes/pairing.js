@@ -1,7 +1,7 @@
 import express from "express";
-import crypto from "crypto";
 import { createClient } from "@supabase/supabase-js";
 import { verifyUser } from "../middleware/auth.js";
+import { sha256, generateToken } from "../utils/crypto.js";
 
 const router = express.Router();
 
@@ -10,13 +10,11 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_KEY
 );
 
-
-// 🔐 STEP 1: REQUEST PAIR TOKEN
+// 🔐 STEP 1: REQUEST PAIRING
 router.post("/request", verifyUser, async (req, res) => {
   try {
     const { device_id, pair_token } = req.body;
 
-    // check device exists
     const { data: device } = await supabase
       .from("factory_devices")
       .select("*")
@@ -31,7 +29,7 @@ router.post("/request", verifyUser, async (req, res) => {
       return res.status(400).json({ error: "Already paired" });
     }
 
-    // verify token
+    // validate pairing token
     const { data: tokenRow } = await supabase
       .from("pairing_tokens")
       .select("*")
@@ -39,12 +37,12 @@ router.post("/request", verifyUser, async (req, res) => {
       .eq("device_id", device_id)
       .single();
 
-    if (!tokenRow || tokenRow.used || new Date(tokenRow.expires_at) < new Date()) {
-      return res.status(401).json({ error: "Invalid or expired token" });
+    if (!tokenRow || tokenRow.used) {
+      return res.status(401).json({ error: "Invalid token" });
     }
 
     // generate owner token
-    const owner_token = crypto.randomBytes(16).toString("hex");
+    const owner_token = generateToken(16);
 
     res.json({
       namespace: device.namespace,
@@ -52,7 +50,7 @@ router.post("/request", verifyUser, async (req, res) => {
       owner_token
     });
 
-  } catch (err) {
+  } catch {
     res.status(500).json({ error: "Pair request failed" });
   }
 });
@@ -71,10 +69,7 @@ router.post("/verify", verifyUser, async (req, res) => {
 
     if (!device) return res.status(404).json({ error: "Not found" });
 
-    const expected = crypto
-      .createHash("sha256")
-      .update(challenge + device.device_token)
-      .digest("hex");
+    const expected = sha256(challenge + device.device_token);
 
     if (expected !== response) {
       return res.status(401).json({ error: "Invalid device" });
