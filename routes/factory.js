@@ -9,37 +9,65 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_KEY
 );
 
-// ⚙️ GENERATE DEVICE
+// ⚙️ GENERATE DEVICE (SECURE VERSION)
 router.post("/device", async (req, res) => {
   try {
-    const DEVICE_ID = "esp32-" + crypto.randomBytes(4).toString("hex");
-    const DEVICE_SALT = crypto.randomBytes(16).toString("hex");
-    const NAMESPACE = crypto.randomBytes(16).toString("hex");
+    const device_id = "esp32-" + crypto.randomBytes(4).toString("hex");
 
-    const { error } = await supabase
+    // 🔐 permanent secret (DO NOT EXPOSE)
+    const device_token = crypto.randomBytes(32).toString("hex");
+
+    const namespace = crypto.randomBytes(16).toString("hex");
+
+    // 🔐 short-lived pairing token
+    const pair_token = crypto.randomBytes(8).toString("hex");
+
+    // ⏳ expiry (10 min)
+    const expires_at = new Date(Date.now() + 10 * 60 * 1000);
+
+    // ✅ insert factory device
+    const { error: factoryError } = await supabase
       .from("factory_devices")
       .insert({
-        device_id: DEVICE_ID,
-        device_salt: DEVICE_SALT,
-        namespace: NAMESPACE,
+        device_id,
+        device_token,
+        namespace,
         status: "created",
+        paired: false,
         created_at: new Date()
       });
 
-    if (error) {
-      console.error("DB ERROR:", error);
+    if (factoryError) {
+      console.error("DB ERROR:", factoryError);
       return res.status(500).json({
         success: false,
-        error: error.message
+        error: factoryError.message
       });
     }
 
+    // ✅ insert pairing token
+    const { error: tokenError } = await supabase
+      .from("pairing_tokens")
+      .insert({
+        token: pair_token,
+        device_id,
+        expires_at
+      });
+
+    if (tokenError) {
+      console.error("TOKEN ERROR:", tokenError);
+      return res.status(500).json({
+        success: false,
+        error: tokenError.message
+      });
+    }
+
+    // ✅ SAFE RESPONSE (NO SECRETS)
     res.json({
       success: true,
       config: {
-        DEVICE_ID,
-        DEVICE_SALT,
-        NAMESPACE,
+        DEVICE_ID: device_id,
+        PAIR_TOKEN: pair_token,
         MQTT_HOST: process.env.MQTT_HOST
       }
     });
@@ -54,12 +82,12 @@ router.post("/device", async (req, res) => {
 });
 
 
-// 📦 GET ALL FACTORY DEVICES (✅ FIX ADDED)
+// 📦 GET ALL FACTORY DEVICES (SAFE VERSION)
 router.get("/devices", async (req, res) => {
   try {
     const { data, error } = await supabase
       .from("factory_devices")
-      .select("device_id, device_salt, namespace, status, created_at")
+      .select("device_id, namespace, status, paired, created_at")
       .order("created_at", { ascending: false });
 
     if (error) {
