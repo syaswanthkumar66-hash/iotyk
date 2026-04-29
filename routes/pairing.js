@@ -1,66 +1,76 @@
+import express from "express";
+import { createClient } from "@supabase/supabase-js";
+import { verifyUser } from "../middleware/auth.js";
+import { generateToken, sha256 } from "../utils/crypto.js";
+
+const router = express.Router();
+
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_KEY
+);
+
+// ✅ STEP 1: CREATE PAIR TOKEN (ON DEMAND)
 router.post("/request", verifyUser, async (req, res) => {
   try {
-    const { device_id, pair_token } = req.body;
+    const { device_id } = req.body;
 
-    console.log("PAIR REQ:", device_id, pair_token);
-
-    // 🔎 1. Check device
-    const { data: device, error: devErr } = await supabase
+    const { data: device } = await supabase
       .from("factory_devices")
       .select("*")
       .eq("device_id", device_id)
       .maybeSingle();
 
-    if (devErr || !device) {
-      return res.status(404).json({ error: "Device not found" });
-    }
+    if (!device) return res.status(404).json({ error: "Device not found" });
 
     if (device.paired) {
       return res.status(400).json({ error: "Already paired" });
     }
 
-    // 🔎 2. Get pairing token (SAFE)
-    const { data: tokenRow, error: tokenErr } = await supabase
-      .from("pairing_tokens")
-      .select("*")
-      .eq("token", pair_token)
-      .eq("device_id", device_id)
-      .maybeSingle();
+    const pair_token = generateToken(8);
 
-    console.log("TOKEN DB:", tokenRow);
+    await supabase.from("pairing_tokens").insert({
+      token: pair_token,
+      device_id,
+      expires_at: new Date(Date.now() + 5 * 60 * 1000)
+    });
 
-    // ❌ if not found
-    if (tokenErr || !tokenRow) {
-      return res.status(401).json({ error: "Invalid token (not found)" });
-    }
-
-    // ❌ if already used
-    if (tokenRow.used) {
-      return res.status(401).json({ error: "Token already used" });
-    }
-
-    // ❌ if expired
-    if (new Date(tokenRow.expires_at) < new Date()) {
-      return res.status(401).json({ error: "Token expired" });
-    }
-
-    // ✅ mark token used (optional but recommended)
-    await supabase
-      .from("pairing_tokens")
-      .update({ used: true })
-      .eq("token", pair_token);
-
-    // 🔐 generate owner token
     const owner_token = generateToken(16);
 
     res.json({
+      pair_token,
       namespace: device.namespace,
       mqtt_host: process.env.MQTT_HOST,
       owner_token
     });
 
-  } catch (err) {
-    console.error("PAIR ERROR:", err);
+  } catch {
     res.status(500).json({ error: "Pair request failed" });
   }
 });
+
+// ✅ STEP 2: VERIFY DEVICE
+router.post("/verify", verifyUser, async (req, res) => {
+  try {
+    const { device_id, challenge, response } = req.body;
+
+    const { data: device } = await supabase
+      .from("factory_devices")
+      .select("*")
+      .eq("device_id", device_id)
+      .maybeSingle();
+
+    const expected = sha256(challenge + device.device_token);
+
+    if (expected !== response) {
+      return res.status(401).json({ error: "Invalid device" });
+    }
+
+    res.json({ success: true });
+
+  } catch {
+    res.status(500).json({ error: "Verify failed" });
+  }
+});
+
+export default router;
