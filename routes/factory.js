@@ -9,7 +9,7 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_KEY
 );
 
-// ✅ GENERATE DEVICE (NO PAIR TOKEN HERE)
+// 🏭 GENERATE DEVICE (CORRECT ARCHITECTURE)
 router.post("/device", async (req, res) => {
   try {
     const device_id = "esp32-" + crypto.randomBytes(4).toString("hex");
@@ -23,13 +23,19 @@ router.post("/device", async (req, res) => {
         device_token,
         namespace,
         status: "created",
-        paired: false
+        paired: false,
+        created_at: new Date()
       });
 
     if (error) {
-      return res.status(500).json({ error: error.message });
+      console.error("DB ERROR:", error);
+      return res.status(500).json({
+        success: false,
+        error: error.message
+      });
     }
 
+    // ✅ SAFE RESPONSE (NO SECRET)
     res.json({
       success: true,
       config: {
@@ -38,20 +44,33 @@ router.post("/device", async (req, res) => {
       }
     });
 
-  } catch {
-    res.status(500).json({ error: "Factory error" });
+  } catch (err) {
+    console.error("FACTORY ERROR:", err);
+    res.status(500).json({
+      success: false,
+      error: "Factory generation failed"
+    });
   }
 });
 
-// 📦 LIST DEVICES
+
+// 📦 GET DEVICES
 router.get("/devices", async (req, res) => {
-  const { data, error } = await supabase
-    .from("factory_devices")
-    .select("device_id, namespace, status, paired");
+  try {
+    const { data, error } = await supabase
+      .from("factory_devices")
+      .select("device_id, namespace, status, paired, created_at")
+      .order("created_at", { ascending: false });
 
-  if (error) return res.status(500).json({ error: error.message });
+    if (error) {
+      return res.status(500).json({ error: error.message });
+    }
 
-  res.json(data);
+    res.json(data);
+
+  } catch (err) {
+    res.status(500).json({ error: "Fetch failed" });
+  }
 });
 
 export default router;
