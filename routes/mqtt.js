@@ -1,63 +1,27 @@
 import express from "express";
-import { verifyUser } from "../middleware/auth.js";
-import { createMQTTSession } from "../services/mqttSession.js";
+import { createClient } from "@supabase/supabase-js";
 
 const router = express.Router();
 
-// 🔹 Create session
-router.post("/session", verifyUser, async (req, res) => {
-  try {
-    const { device_id } = req.body;
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_KEY
+);
 
-    const ip =
-      req.headers["x-forwarded-for"] || req.socket.remoteAddress;
+router.post("/auth", async (req, res) => {
+  const { username, password } = req.body;
 
-    const session = await createMQTTSession(
-      req.user.id,
-      device_id,
-      ip
-    );
+  const { data: device } = await supabase
+    .from("factory_devices")
+    .select("*")
+    .eq("device_id", username)
+    .maybeSingle();
 
-    res.json({
-      success: true,
-      data: session,
-    });
-
-  } catch (err) {
-    console.error("SESSION ERROR:", err.message);
-
-    res.status(400).json({
-      success: false,
-      error: err.message,
-    });
+  if (!device || device.device_token !== password) {
+    return res.json({ result: "deny" });
   }
-});
 
-// 🔹 Refresh session
-router.post("/refresh", verifyUser, async (req, res) => {
-  try {
-    const { device_id } = req.body;
-
-    const ip =
-      req.headers["x-forwarded-for"] || req.socket.remoteAddress;
-
-    const session = await createMQTTSession(
-      req.user.id,
-      device_id,
-      ip
-    );
-
-    res.json({
-      success: true,
-      data: session,
-    });
-
-  } catch (err) {
-    res.status(400).json({
-      success: false,
-      error: err.message,
-    });
-  }
+  res.json({ result: "allow" });
 });
 
 export default router;
